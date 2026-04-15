@@ -86,6 +86,16 @@ static GLuint qemu_gl_create_compile_shader(GLenum type, const GLchar *src)
     GLuint shader;
     GLint status, length;
     char *errmsg;
+    char *patched_src = NULL;
+
+    /*
+     * macOS desktop OpenGL (Core Profile) does not accept "#version 300 es".
+     * Replace it with "#version 150 core" when running on a desktop GL context.
+     */
+    if (epoxy_is_desktop_gl() && strncmp(src, "#version 300 es", 15) == 0) {
+        patched_src = g_strdup_printf("#version 150 core%s", src + 15);
+        src = patched_src;
+    }
 
     shader = glCreateShader(type);
     glShaderSource(shader, 1, &src, 0);
@@ -100,8 +110,10 @@ static GLuint qemu_gl_create_compile_shader(GLenum type, const GLchar *src)
                 (type == GL_VERTEX_SHADER) ? "vertex" : "fragment",
                 errmsg);
         g_free(errmsg);
+        g_free(patched_src);
         return 0;
     }
+    g_free(patched_src);
     return shader;
 }
 

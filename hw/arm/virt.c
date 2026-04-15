@@ -63,6 +63,8 @@
 #include "hw/pci-bridge/pci_expander_bridge.h"
 #include "hw/virtio/virtio-pci.h"
 #include "hw/core/sysbus-fdt.h"
+
+#define TYPE_HANTRO_JPEG "hantro-jpeg-dec"
 #include "hw/core/platform-bus.h"
 #include "hw/core/qdev-properties.h"
 #include "hw/arm/fdt.h"
@@ -196,6 +198,7 @@ static const MemMapEntry base_memmap[] = {
     [VIRT_PVTIME] =             { 0x090a0000, 0x00010000 },
     [VIRT_SECURE_GPIO] =        { 0x090b0000, 0x00001000 },
     [VIRT_ACPI_PCIHP] =         { 0x090c0000, ACPI_PCIHP_SIZE },
+    [VIRT_HANTRO_JPEG] =        { 0x090d0000, 0x00001000 },
     [VIRT_MMIO] =               { 0x0a000000, 0x00000200 },
     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
@@ -1172,6 +1175,29 @@ static void create_gpio_devices(const VirtMachineState *vms, int gpio,
     } else {
         create_secure_gpio_pwr(ms->fdt, pl061_dev, phandle);
     }
+}
+
+static void create_hantro_jpeg(const VirtMachineState *vms, MemoryRegion *mem)
+{
+    hwaddr base = vms->memmap[VIRT_HANTRO_JPEG].base;
+    hwaddr size = vms->memmap[VIRT_HANTRO_JPEG].size;
+    MachineState *ms = MACHINE(vms);
+    DeviceState *dev;
+    SysBusDevice *s;
+    char *nodename;
+
+    dev = qdev_new(TYPE_HANTRO_JPEG);
+    s = SYS_BUS_DEVICE(dev);
+    sysbus_realize_and_unref(s, &error_fatal);
+    memory_region_add_subregion(mem, base, sysbus_mmio_get_region(s, 0));
+
+    nodename = g_strdup_printf("/hantro-jpeg@%" PRIx64, base);
+    qemu_fdt_add_subnode(ms->fdt, nodename);
+    qemu_fdt_setprop_string(ms->fdt, nodename,
+                            "compatible", "hantro,jpeg-decoder");
+    qemu_fdt_setprop_sized_cells(ms->fdt, nodename, "reg",
+                                 2, base, 2, size);
+    g_free(nodename);
 }
 
 static void create_virtio_devices(const VirtMachineState *vms)
@@ -2589,6 +2615,8 @@ static void machvirt_init(MachineState *machine)
      * no backend is created the transport will just sit harmlessly idle.
      */
     create_virtio_devices(vms);
+
+    create_hantro_jpeg(vms, sysmem);
 
     vms->fw_cfg = create_fw_cfg(vms, &address_space_memory);
     rom_set_fw(vms->fw_cfg);

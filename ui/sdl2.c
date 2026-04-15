@@ -113,6 +113,16 @@ void sdl2_window_create(struct sdl2_console *scon)
 
         if (scon->opts->gl == DISPLAY_GL_MODE_ES) {
             driver = "opengles2";
+        } else {
+            /*
+             * macOS only provides OpenGL via a Core Profile 3.2+ context.
+             * Without this, SDL gives a legacy 2.1 context where
+             * GLSL "#version 150" and higher are not supported.
+             */
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK,
+                                SDL_GL_CONTEXT_PROFILE_CORE);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+            SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 2);
         }
 
         SDL_SetHint(SDL_HINT_RENDER_DRIVER, driver);

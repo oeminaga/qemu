@@ -1621,7 +1621,12 @@ static bool virtqueue_map_desc(VirtIODevice *vdev, unsigned int *p_num_sg,
     assert(num_sg <= max_num_sg);
 
     if (!sz) {
-        virtio_error(vdev, "virtio: zero sized buffers are not allowed");
+        error_report("DIAG: virtio zero-len buffer: device=%s pa=0x%"HWADDR_PRIx
+                     " is_write=%d num_sg=%u max_num_sg=%u",
+                     vdev->name, pa, is_write, num_sg, max_num_sg);
+        virtio_error(vdev, "virtio: zero sized buffers are not allowed "
+                     "(device=%s pa=0x%"HWADDR_PRIx" is_write=%d)",
+                     vdev->name, pa, is_write);
         goto out;
     }
 
@@ -1812,6 +1817,18 @@ static void *virtqueue_split_pop(VirtQueue *vq, size_t sz)
     /* Collect all the descriptors */
     do {
         bool map_ok;
+
+        if (desc.len == 0) {
+            error_report("DIAG: split_pop zero-len desc: device=%s head=%u i=%u "
+                         "addr=0x%"PRIx64" len=%u flags=0x%x next=%u "
+                         "last_avail=%u max=%u "
+                         "avail_pa=0x%"PRIx64" desc_pa=0x%"PRIx64" inuse=%u",
+                         vdev->name, head, i,
+                         (uint64_t)desc.addr, desc.len, desc.flags,
+                         desc.next, vq->last_avail_idx - 1, max,
+                         (uint64_t)vq->vring.avail, (uint64_t)vq->vring.desc,
+                         vq->inuse);
+        }
 
         if (desc.flags & VRING_DESC_F_WRITE) {
             map_ok = virtqueue_map_desc(vdev, &in_num, addr + out_num,

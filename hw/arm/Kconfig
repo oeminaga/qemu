@@ -26,6 +26,7 @@ config ARM_VIRT
     select SMBIOS
     select VIRTIO_MMIO
     select ACPI_PCI
+    select HANTRO_JPEG
     select MEM_DEVICE
     select DIMM
     select ACPI_HW_REDUCED
