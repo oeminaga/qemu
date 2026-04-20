@@ -188,6 +188,7 @@ void hvf_arm_init_debug(void)
 #define SYSREG_OSDLR_EL1      SYSREG(2, 0, 1, 3, 4)
 #define SYSREG_LORC_EL1       SYSREG(3, 0, 10, 4, 3)
 #define SYSREG_CNTPCT_EL0     SYSREG(3, 3, 14, 0, 1)
+#define SYSREG_MPIDR_EL1      SYSREG(3, 0, 0, 0, 5)
 #define SYSREG_CNTP_CTL_EL0   SYSREG(3, 3, 14, 2, 1)
 #define SYSREG_PMCR_EL0       SYSREG(3, 3, 9, 12, 0)
 #define SYSREG_PMUSERENR_EL0  SYSREG(3, 3, 9, 14, 0)
@@ -1585,6 +1586,10 @@ static int hvf_sysreg_read(CPUState *cpu, uint32_t reg, uint64_t *val)
         *val = qemu_clock_get_ns(QEMU_CLOCK_VIRTUAL) /
               gt_cntfrq_period_ns(arm_cpu);
         return 0;
+    case SYSREG_MPIDR_EL1:
+        *val = arm_cpu->mp_affinity;
+        error_report("hvf: SYSREG MPIDR_EL1 trapped, returning 0x%llx", (unsigned long long)*val);
+        return 0;
     case SYSREG_OSLSR_EL1:
         *val = env->cp15.oslsr_el1;
         return 0;
@@ -1709,6 +1714,10 @@ static int hvf_sysreg_read(CPUState *cpu, uint32_t reg, uint64_t *val)
                                     SYSREG_CRN(reg),
                                     SYSREG_CRM(reg),
                                     SYSREG_OP2(reg));
+    error_report("hvf: unhandled sysreg READ pc=0x%llx op0=%d op1=%d crn=%d crm=%d op2=%d reg=0x%x",
+                 (unsigned long long)env->pc,
+                 SYSREG_OP0(reg), SYSREG_OP1(reg), SYSREG_CRN(reg),
+                 SYSREG_CRM(reg), SYSREG_OP2(reg), reg);
     hvf_raise_exception(cpu, EXCP_UDEF, syn_uncategorized(), 1);
     return 1;
 }
@@ -1996,6 +2005,10 @@ static int hvf_sysreg_write(CPUState *cpu, uint32_t reg, uint64_t val)
                                      SYSREG_CRN(reg),
                                      SYSREG_CRM(reg),
                                      SYSREG_OP2(reg));
+    error_report("hvf: unhandled sysreg WRITE pc=0x%llx op0=%d op1=%d crn=%d crm=%d op2=%d reg=0x%x",
+                 (unsigned long long)env->pc,
+                 SYSREG_OP0(reg), SYSREG_OP1(reg), SYSREG_CRN(reg),
+                 SYSREG_CRM(reg), SYSREG_OP2(reg), reg);
     hvf_raise_exception(cpu, EXCP_UDEF, syn_uncategorized(), 1);
     return 1;
 }
@@ -2172,13 +2185,34 @@ static int hvf_handle_exception(CPUState *cpu, hv_vcpu_exit_exception_t *excp)
          * TODO: If s1ptw, this is an error in the guest os page tables.
          * Inject the exception into the guest.
          */
-        assert(!s1ptw);
+        if (s1ptw) {
+            cpu_synchronize_state(cpu);
+            error_report("hvf: EC_DATAABORT with s1ptw=1 (page table walk fault) "
+                         "PC=0x%" PRIx64 " IPA=0x%" PRIx64 " VA=0x%" PRIx64,
+                         env->pc, ipa, excp->virtual_address);
+            hvf_raise_exception(cpu, EXCP_DATA_ABORT,
+                                syn_data_abort_no_iss(1, 0, 0, 0, 1, iswrite, 0x10), 1);
+            advance_pc = false;
+            break;
+        }
 
         /*
          * TODO: ISV will be 0 for SIMD or SVE accesses.
          * Inject the exception into the guest.
          */
-        assert(isv);
+        if (!isv) {
+            cpu_synchronize_state(cpu);
+            error_report("hvf: EC_DATAABORT with ISV=0 (SIMD/SVE?) "
+                         "PC=0x%" PRIx64 " IPA=0x%" PRIx64 " VA=0x%" PRIx64
+                         " iswrite=%d s1ptw=%d",
+                         env->pc, ipa, excp->virtual_address,
+                         iswrite, s1ptw);
+            /* Inject a data abort into the guest so it doesn't silently hang */
+            hvf_raise_exception(cpu, EXCP_DATA_ABORT,
+                                syn_data_abort_no_iss(1, 0, 0, 0, 0, iswrite, 0x10), 1);
+            advance_pc = false;
+            break;
+        }
 
         /*
          * Emulate MMIO.
