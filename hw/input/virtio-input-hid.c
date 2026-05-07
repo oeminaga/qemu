@@ -34,6 +34,16 @@ static const unsigned short keymap_button[INPUT_BUTTON__MAX] = {
     [INPUT_BUTTON_TOUCH]             = BTN_TOUCH,
 };
 
+static inline bool input_button_is_valid(int button)
+{
+    return button >= 0 && button < INPUT_BUTTON__MAX;
+}
+
+static inline const char *input_button_name_safe(int button)
+{
+    return input_button_is_valid(button) ? InputButton_str(button) : "unknown";
+}
+
 static const unsigned short axismap_rel[INPUT_AXIS__MAX] = {
     [INPUT_AXIS_X]                   = REL_X,
     [INPUT_AXIS_Y]                   = REL_Y,
@@ -116,7 +126,16 @@ static void virtio_input_handle_event(DeviceState *dev, QemuConsole *src,
             event.value = cpu_to_le32(btn->button == INPUT_BUTTON_WHEEL_UP
                                       ? 1 : -1);
             virtio_input_send(vinput, &event);
-        } else if (keymap_button[btn->button]) {
+        } else if ((btn->button == INPUT_BUTTON_WHEEL_LEFT ||
+                    btn->button == INPUT_BUTTON_WHEEL_RIGHT) &&
+                   btn->down) {
+            event.type  = cpu_to_le16(EV_REL);
+            event.code  = cpu_to_le16(REL_HWHEEL);
+            event.value = cpu_to_le32(btn->button == INPUT_BUTTON_WHEEL_LEFT
+                                      ? -1 : 1);
+            virtio_input_send(vinput, &event);
+        } else if (input_button_is_valid(btn->button) &&
+                   keymap_button[btn->button]) {
             event.type  = cpu_to_le16(EV_KEY);
             event.code  = cpu_to_le16(keymap_button[btn->button]);
             event.value = cpu_to_le32(btn->down ? 1 : 0);
@@ -125,7 +144,7 @@ static void virtio_input_handle_event(DeviceState *dev, QemuConsole *src,
             if (btn->down) {
                 fprintf(stderr, "%s: unmapped button: %d [%s]\n", __func__,
                         btn->button,
-                        InputButton_str(btn->button));
+                        input_button_name_safe(btn->button));
             }
         }
         break;
